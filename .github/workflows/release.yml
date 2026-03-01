@@ -1,5 +1,6 @@
-# This workflow will build bilibili-linux packages across multiple architectures
-# Optimized for dependency consistency, cache efficiency and syntax standardization
+# This workflow will do a clean installation of node dependencies, cache/restore them, build the source code and run tests across different versions of node
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-nodejs-with-github-actions
+
 name: Build Packages
 
 on:
@@ -20,33 +21,35 @@ jobs:
   build-app:
     name: Build Base Packages
     runs-on: ubuntu-latest
+
     strategy:
       matrix:
         node-version: [22.x]
         ARCH: ['x64']
 
     steps:
-      - uses: actions/checkout@v4  # 升级到最新版
+      - uses: actions/checkout@v4  # 升级到v4修复兼容性
         with:
           submodules: 'recursive'
-          
-      - name: Use Node.js ${{ matrix.node-version }}
+      - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22.x'
-          cache: 'pnpm'  # 启用pnpm缓存，自动识别pnpm-lock.yaml
+          node-version: '22.15.0'
+          cache: 'pnpm'  # 启用pnpm缓存
 
-      - name: System Dependencies & Tool Setup
+      - name: Prepare (Fix PNPM Path)
         run: |
           sudo apt update && sudo apt install -y wget exiftool
-          sudo npm install -g asar
+          sudo npm install asar -g
+          # 正确配置pnpm并立即生效PATH
           corepack enable
-          pnpm setup
-          echo "export PATH=\$HOME/.local/share/pnpm:\$PATH" >> $GITHUB_ENV
-          
-      - name: Install Dependencies
-        run: |
-          pnpm install  # 统一使用pnpm，避免npm/pnpm混用
+          pnpm setup || true
+          # 手动添加pnpm到PATH（关键修复）
+          echo "PATH=$HOME/.local/share/pnpm:$PATH" >> $GITHUB_ENV
+          # 验证pnpm是否可用
+          pnpm --version
+          # 安装依赖（替换npm为pnpm）
+          pnpm install
           echo "$UID, $GID"
 
       - name: Generate TAG
@@ -54,15 +57,15 @@ jobs:
         run: |
           tag='continuous'
           name='Continuous Build'
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          if [ 'true' == ${{ startsWith(github.ref, 'refs/tags/') }} ];then
             tag='${{ github.ref_name }}'
             name='${{ github.ref_name }}'
           fi
           echo "tag result: $tag - $name"
-          echo "tag=$tag" >> $GITHUB_OUTPUT
-          echo "name=$name" >> $GITHUB_OUTPUT
-
-      - name: Build Core Resources
+          echo "::set-output name=tag::$tag"
+          echo "::set-output name=name::$name"
+         
+      - name: Build
         env:
           BUILD_ARCH: ${{ matrix.ARCH }}
         run: |
@@ -71,38 +74,40 @@ jobs:
           tools/fix-other.sh
           tools/extension.sh
           mv tmp/bili/resources/* app
-
+  
       - name: Compress Resources
         run: |
           ls -l
-          mkdir -p tmp/src tmp/build
-          tar -zcf tmp/src/bilibili-asar-${{ steps.Tag.outputs.tag }}.tar.gz bin app
-          cp tmp/src/bilibili-asar-${{ steps.Tag.outputs.tag }}.tar.gz tmp/build/
-          tar -zcf tmp/build/extensions-${{ steps.Tag.outputs.tag }}.tar.gz dist/extension
+          mkdir -p tmp/src
+          mkdir -p tmp/build
+          tar -zcf tmp/src/bilibili-asar-${{ steps.tag.outputs.tag }}.tar.gz bin app # electron
+          cp tmp/src/bilibili-asar-${{ steps.tag.outputs.tag }}.tar.gz tmp/build/bilibili-asar-${{ steps.tag.outputs.tag }}.tar.gz
+          tar -zcf tmp/build/extensions-${{ steps.tag.outputs.tag }}.tar.gz dist/extension
 
-      - name: Fix Continuous Build Naming
-        if: steps.Tag.outputs.tag == 'continuous'
+      - name: Fix name for continuous
+        if: steps.tag.outputs.tag == 'continuous'
         run: |
           version=$(cat conf/bilibili_version)
           mv ./tmp/build/bilibili-asar-continuous.tar.gz ./tmp/build/bilibili-asar-${version}-continuous.tar.gz
-          mv ./tmp/build/extensions-continuous.tar.gz ./tmp/build/extensions-${version}-continuous.tar.gz
+          mv ./tmp/build/extensions-${{ steps.tag.outputs.tag }}.tar.gz ./tmp/build/extensions-${version}-continuous.tar.gz
 
-      - name: Upload Source Artifact
+      - name: Upload artifact (src)
         uses: actions/upload-artifact@v4
         with:
           name: bilibili-app.src
           path: tmp/src
-          
-      - name: Upload Build Artifact
+      - name: Upload artifact (build)
         uses: actions/upload-artifact@v4
         with:
           name: bilibili-app.build
           path: tmp/build
 
   build-linux-simple:
-    name: Build Linux Archive (${{ matrix.ARCH }})
-    needs: build-app
+    name: Build Linux Archive
+    needs:
+      - build-app
     runs-on: ubuntu-latest
+
     strategy:
       matrix:
         node-version: [16.x]
@@ -112,25 +117,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
-          
-      - name: Download Base Artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           name: bilibili-app.src
           path: tmp/src
-          
-      - name: Use Node.js ${{ matrix.node-version }}
+      - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
-          cache: false  # 旧Node版本无需缓存
+          node-version: 16.x
 
-      - name: Prepare Build Environment
+      - name: Prepare
         env:
           BUILD_ARCH: ${{ matrix.ARCH }}
         run: |
-          sudo apt install -y wget exiftool
-          sudo npm install -g asar
+          sudo apt update && sudo apt install -y wget exiftool
+          sudo npm install asar -g
           echo "$UID, $GID"
           ls -l
           tools/build-prepare.sh
@@ -140,69 +142,77 @@ jobs:
         run: |
           tag='continuous'
           name='Continuous Build'
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          if [ 'true' == ${{ startsWith(github.ref, 'refs/tags/') }} ];then
             tag='${{ github.ref_name }}'
             name='${{ github.ref_name }}'
           fi
-          echo "tag=$tag" >> $GITHUB_OUTPUT
-          echo "name=$name" >> $GITHUB_OUTPUT
-
-      - name: Build Linux Archive
+          echo "tag result: $tag - $name"
+          echo "::set-output name=tag::$tag"
+          echo "::set-output name=name::$name"
+         
+      - name: Build
         env:
           BUILD_ARCH: ${{ matrix.ARCH }}
         run: |
           ls -l
           tools/update-electron.sh
-
-      - name: Compress Final Archive
+  
+      - name: Compress Resources
         run: |
           ls -l
+          mkdir -p tmp/src
           mkdir -p tmp/build
           version=$(cat conf/bilibili_version)
-          tar -zcf tmp/build/bilibili-${version}-${{ steps.Tag.outputs.tag }}-${{ matrix.ARCH }}.tar.gz bin app electron
-
-      - name: Fix Tag Naming for Releases
-        if: steps.Tag.outputs.tag != 'continuous'
+          tar -zcf tmp/build/bilibili-${version}-${{ steps.tag.outputs.tag }}-${{ matrix.ARCH }}.tar.gz bin app electron
+          
+      - name: Fix name for continuous
+        if: steps.tag.outputs.tag != 'continuous'
         run: |
           version=$(cat conf/bilibili_version)
-          mv ./tmp/build/bilibili-${version}-${{ steps.Tag.outputs.tag }}-${{ matrix.ARCH }}.tar.gz ./tmp/build/bilibili-${{ steps.Tag.outputs.tag }}-${{ matrix.ARCH }}.tar.gz
+          mv ./tmp/build/bilibili-${version}-${{ steps.tag.outputs.tag }}-${{ matrix.ARCH }}.tar.gz ./tmp/build/bilibili-${{ steps.tag.outputs.tag }}-${{ matrix.ARCH }}.tar.gz
 
-      - name: Upload Linux Archive
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bilibili-${{ matrix.ARCH }}-archive.build
+          name: bilibili-${{ matrix.ARCH }}-archiev.build
           path: tmp/build
 
   build-linux-package:
-    name: Build Linux Package (${{ matrix.ARCH }})
-    needs: build-app
+    name: Build Linux Package
+    needs:
+      - build-app
     runs-on: ubuntu-latest
+
     strategy:
       matrix:
+        node-version: [16.x]
         ARCH: ['x64', 'loong64']
 
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Download Base Artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           name: bilibili-app.src
           path: tmp/src
-          
-      - name: Use Node.js 22.x
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '22.x'
-          cache: 'pnpm'
+          node-version: 22
+          cache: 'pnpm' # 启用pnpm缓存
 
-      - name: Setup PNPM & Dependencies
+      - name: Prepare (Fix PNPM Path)
         env:
           BUILD_ARCH: ${{ matrix.ARCH }}
         run: |
-          sudo npm install -g asar
+          sudo npm install asar -g
+          # 正确配置pnpm
+          corepack enable
           corepack enable pnpm
           corepack use pnpm@latest
+          # 手动添加pnpm到PATH（关键修复）
+          echo "PATH=$HOME/.local/share/pnpm:$PATH" >> $GITHUB_ENV
+          # 验证pnpm
+          pnpm --version
           pnpm install
           echo "$UID, $GID"
 
@@ -211,16 +221,17 @@ jobs:
         run: |
           tag='continuous'
           name='Continuous Build'
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          if [ 'true' == ${{ startsWith(github.ref, 'refs/tags/') }} ];then
             tag='${{ github.ref_name }}'
             name='${{ github.ref_name }}'
           fi
-          echo "tag=$tag" >> $GITHUB_OUTPUT
-          echo "name=$name" >> $GITHUB_OUTPUT
-
-      - name: Build Linux Package
+          echo "tag result: $tag - $name"
+          echo "::set-output name=tag::$tag"
+          echo "::set-output name=name::$name"
+         
+      - name: Build
         env:
-          BUILD_VERSION: ${{ steps.Tag.outputs.tag }}
+          BUILD_VERSION: ${{ steps.tag.outputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BUILD_ARCH: ${{ matrix.ARCH }}
         run: |
@@ -228,48 +239,50 @@ jobs:
           mkdir -p tmp/build
           tools/build-prepare.sh
           asar e app/app.asar app/app
-          if [[ "$BUILD_ARCH" == loong* ]]; then
+          if [[ "$BUILD_ARCH" == loong* ]];then
             pnpm run pkg-loongarch
           else
             pnpm run pkg-linux
           fi
           rm -rf tmp/build/*-unpacked
 
-      - name: Upload Linux Package
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: bilibili-${{ matrix.ARCH }}-linuxpkg.build
           path: tmp/build
 
   build-win:
-    name: Build Windows Package (${{ matrix.ARCH }})
-    needs: build-app
+    name: Build Windows
+    needs:
+      - build-app
     runs-on: ubuntu-latest
     container: scottyhardy/docker-wine
     strategy:
       matrix:
+        node-version: [16.x]
         ARCH: ['x64']
 
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Download Base Artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           name: bilibili-app.src
           path: tmp/src
-          
-      - name: Use Node.js 20.x
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20.x'
-          cache: 'npm'  # Windows构建使用npm缓存
 
-      - name: Prepare Windows Build Env
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm' # Windows构建用npm
+
+      - name: Prepare
         run: |
           set -x
+          echo $SHELL
+          cat /etc/issue
           apt update && apt install -y wget
-          npm install -g asar
+          npm install asar -g
           npm install
           echo "$UID"
 
@@ -278,20 +291,22 @@ jobs:
         run: |
           tag='continuous'
           name='Continuous Build'
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          if [ 'true' == ${{ startsWith(github.ref, 'refs/tags/') }} ];then
             tag='${{ github.ref_name }}'
             name='${{ github.ref_name }}'
           fi
-          echo "tag=$tag" >> $GITHUB_OUTPUT
-          echo "name=$name" >> $GITHUB_OUTPUT
-
-      - name: Build Windows Package
+          echo "tag result: $tag - $name"
+          echo "::set-output name=tag::$tag"
+          echo "::set-output name=name::$name"
+         
+      - name: Build
         env:
-          BUILD_VERSION: ${{ steps.Tag.outputs.tag }}
+          BUILD_VERSION: ${{ steps.tag.outputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BUILD_ARCH: ${{ matrix.ARCH }}
         run: |
           ls -l
+          # from @Xarth-Mai
           sudo chown -R $(whoami) /github/home
           mkdir -p tmp/build
           tools/build-prepare.sh
@@ -299,101 +314,95 @@ jobs:
           npm run pkg-win
           rm -rf tmp/build/*-unpacked
 
-      - name: Upload Windows Package
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: bilibili-${{ matrix.ARCH }}-winpkg.build
           path: tmp/build
 
   build-deepin:
-    name: Build Deepin Package (${{ matrix.ARCH }})
-    needs: build-app
+    name: Build Deepin Package
+    needs:
+      - build-app
     runs-on: ubuntu-latest
+
     strategy:
       matrix:
         ARCH: ['x64', 'arm64', 'loong64']
 
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Download Base Artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           name: bilibili-app.src
           path: tmp/src
-          
-      - name: Install Deb Build Dependencies
+
+      - name: Prepare
         run: |
-          sudo apt update && sudo apt install -y \
-            build-essential fakeroot devscripts debhelper
+          sudo apt update && sudo apt-get install -y build-essential fakeroot devscripts debhelper
 
       - name: Generate TAG
         id: Tag
         run: |
           tag='continuous'
           name='Continuous Build'
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          if [ 'true' == ${{ startsWith(github.ref, 'refs/tags/') }} ];then
             tag='${{ github.ref_name }}'
             name='${{ github.ref_name }}'
           else
             BILIBILI_VERSION=$(cat conf/bilibili_version)
             tag="v${BILIBILI_VERSION}-${tag}"
           fi
-          echo "tag=$tag" >> $GITHUB_OUTPUT
-          echo "name=$name" >> $GITHUB_OUTPUT
+          echo "tag result: $tag - $name"
+          echo "::set-output name=tag::$tag"
+          echo "::set-output name=name::$name"
 
-      - name: Build Deepin Deb Package
+      - name: Build Deb Package
         env:
           BUILD_ARCH: ${{ matrix.ARCH }}
-          BUILD_TAG: ${{ steps.Tag.outputs.tag }}
+          BUILD_TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          export BUILD_VERSION=${{ steps.Tag.outputs.tag }}
+          export BUILD_VERSION=${{ steps.tag.outputs.tag }}
           ls -l
           mkdir -p tmp/build
           tools/build-prepare.sh
-          
-          # Architecture specific setup
-          if [ "${{ matrix.ARCH }}" == "arm64" ]; then
+          echo "${{ matrix.ARCH }}"
+          if [ "${{ matrix.ARCH }}" == "arm64" ];then
             export LD_LIBRARY_PATH="/usr/aarch64-linux-gnu/lib"
           fi
-          
           tools/update-electron.sh
-          
-          # Convert x64 to amd64 for deb packaging
-          if [ "$BUILD_ARCH" == "x64" ]; then
+          if [ "$BUILD_ARCH" == "x64" ];then
             export BUILD_ARCH="amd64"
           fi
-          
           dpkg --version
-          
-          # Loongarch specific build
-          if [[ "$BUILD_ARCH" == loong* ]]; then
-            echo "Building for LoongArch"
+          if [[ "$BUILD_ARCH" == loong* ]];then
+            echo "build loong"
             export DOCKER_UID=$(id -u)
             export DOCKER_GID=$(id -g)
             cat /etc/passwd
             env
             tools/build-deepin-loongarch.sh
-            if [ -f tmp/exit_code ]; then
+            if [ -f tmp/exit_code ];then
               exit $(cat tmp/exit_code)
             fi
           else
-            echo "Building standard Deepin package"
-            tools/build-deepin.sh ${{ steps.Tag.outputs.tag }}
+            echo "build simple"
+            tools/build-deepin.sh ${{ steps.tag.outputs.tag }}
             mkdir -p info/DEBIAN
             dpkg -e ./tmp/build/io.github.msojocs.bilibili_*.deb info/DEBIAN
             ls -l info/DEBIAN
             rm -rf info
           fi
 
-      - name: Upload Deepin Package
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: bilibili-${{ matrix.ARCH }}-deepinpkg.build
           path: tmp/build
 
   upload:
-    name: Release & Upload Artifacts
+    name: Create release and upload artifacts
     needs:
       - build-linux-simple
       - build-linux-package
@@ -401,10 +410,9 @@ jobs:
       - build-deepin
     runs-on: ubuntu-latest
     steps:
-      - name: Download All Artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
-      
-      - name: Cleanup & Inspect Artifacts
+      - name: Inspect directory after downloading artifacts
         run: |
           rm -rf ./bilibili-app.src
           ls -alFR
@@ -414,14 +422,15 @@ jobs:
         run: |
           tag='continuous'
           name='Continuous Build'
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          if [ 'true' == ${{ startsWith(github.ref, 'refs/tags/') }} ];then
             tag='${{ github.ref_name }}'
             name='${{ github.ref_name }}'
           fi
-          echo "tag=$tag" >> $GITHUB_OUTPUT
-          echo "name=$name" >> $GITHUB_OUTPUT
+          echo "tag result: $tag - $name"
+          echo "::set-output name=tag::$tag"
+          echo "::set-output name=name::$name"
 
-      - name: Upload Continuous Build Artifacts
+      - name: Create release and upload artifacts (continuous)
         if: startsWith(github.ref, 'refs/heads/')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -430,23 +439,21 @@ jobs:
           wget -q https://github.com/TheAssassin/pyuploadtool/releases/download/continuous/pyuploadtool-x86_64.AppImage
           chmod +x pyuploadtool-x86_64.AppImage
           ./pyuploadtool-x86_64.AppImage \
-            **/*.tar.gz \
-            **/*.AppImage \
-            **/*.deb \
-            **/*.exe \
-            **/*.rpm
+          **build/*.tar.gz \
+          **build/*.AppImage \
+          **build/*.deb \
+          **build/*.exe \
+          **build/*.rpm
 
-      - name: Create Tagged Release
+      - name: Release (tagged)
+        uses: softprops/action-gh-release@v2 # 升级到v2修复兼容性
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2  # 升级到最新版
         with:
-          name: ${{ steps.Tag.outputs.name }}
-          tag_name: ${{ steps.Tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.name }}
+          tag_name: ${{ steps.tag.outputs.tag }}
           files: |
-            **/*.tar.gz
-            **/*.AppImage
-            **/*.deb
-            **/*.exe
-            **/*.rpm
-          draft: false
-          prerelease: false
+            **build/*.tar.gz
+            **build/*.AppImage
+            **build/*.deb
+            **build/*.exe
+            **build/*.rpm
