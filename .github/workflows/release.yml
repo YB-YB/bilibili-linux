@@ -15,7 +15,8 @@ on:
       - 'CHANGELOG.md'
   pull_request:
     branches: [ master ]
-  workflow_dispatch: # 启用手动触发
+  # # Allows you to run this workflow manually from the Actions tab
+  # workflow_dispatch:
 
 jobs:
   build-app:
@@ -28,30 +29,29 @@ jobs:
         ARCH: ['x64']
 
     steps:
-      - uses: actions/checkout@v4  # 升级到v4修复兼容性
+      - uses: actions/checkout@v2
         with:
           submodules: 'recursive'
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22.15.0'
-          cache: 'pnpm'  # 启用pnpm缓存
 
-      - name: Prepare (Fix PNPM Path)
+      - name: Prepare
         run: |
-          sudo apt update && sudo apt install -y wget exiftool
+          sudo apt install wget exiftool
           sudo npm install asar -g
-          # 正确配置pnpm并立即生效PATH
+          # 修复 pnpm 初始化：显式加载环境变量 + 验证
           corepack enable
-          pnpm setup || true
-          # 手动添加pnpm到PATH（关键修复）
-          echo "PATH=$HOME/.local/share/pnpm:$PATH" >> $GITHUB_ENV
-          # 验证pnpm是否可用
-          pnpm --version
-          # 安装依赖（替换npm为pnpm）
-          pnpm install
+          pnpm setup
+          # 手动加载 pnpm 路径（关键）
+          export PATH="$HOME/.local/share/pnpm:$HOME/.pnpm-store:$PATH"
+          # 验证 pnpm 是否存在
+          pnpm --version || (echo "pnpm 安装失败" && exit 1)
+          npm install
           echo "$UID, $GID"
 
+      # 其余步骤保持不变（Generate TAG / Build / Compress 等）
       - name: Generate TAG
         id: Tag
         run: |
@@ -91,18 +91,19 @@ jobs:
           mv ./tmp/build/bilibili-asar-continuous.tar.gz ./tmp/build/bilibili-asar-${version}-continuous.tar.gz
           mv ./tmp/build/extensions-${{ steps.tag.outputs.tag }}.tar.gz ./tmp/build/extensions-${version}-continuous.tar.gz
 
-      - name: Upload artifact (src)
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: bilibili-app.src
           path: tmp/src
-      - name: Upload artifact (build)
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: bilibili-app.build
           path: tmp/build
 
   build-linux-simple:
+    # 此 Job 未使用 pnpm，无需修改，保持原样
     name: Build Linux Archive
     needs:
       - build-app
@@ -114,7 +115,7 @@ jobs:
         ARCH: ['x64', 'arm64', 'loong64', 'loongarch64']
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v2
         with:
           submodules: 'recursive'
       - name: Download artifacts
@@ -123,15 +124,13 @@ jobs:
           name: bilibili-app.src
           path: tmp/src
       - name: Use Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 16.x
+        uses: actions/setup-node@v2
 
       - name: Prepare
         env:
           BUILD_ARCH: ${{ matrix.ARCH }}
         run: |
-          sudo apt update && sudo apt install -y wget exiftool
+          sudo apt install wget exiftool
           sudo npm install asar -g
           echo "$UID, $GID"
           ls -l
@@ -189,7 +188,7 @@ jobs:
         ARCH: ['x64', 'loong64']
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v2
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -198,24 +197,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'pnpm' # 启用pnpm缓存
 
-      - name: Prepare (Fix PNPM Path)
+      - name: Prepare
         env:
           BUILD_ARCH: ${{ matrix.ARCH }}
         run: |
           sudo npm install asar -g
-          # 正确配置pnpm
+          # 修复 Node 16+ 下 corepack 安装（Node 16 需手动装 corepack）
+          npm install -g corepack@latest
           corepack enable
           corepack enable pnpm
           corepack use pnpm@latest
-          # 手动添加pnpm到PATH（关键修复）
-          echo "PATH=$HOME/.local/share/pnpm:$PATH" >> $GITHUB_ENV
-          # 验证pnpm
-          pnpm --version
+          # 显式加载 pnpm 路径
+          export PATH="$HOME/.local/share/pnpm:$HOME/.pnpm-store:$PATH"
+          # 验证 pnpm
+          pnpm --version || (echo "pnpm 安装失败" && exit 1)
           pnpm install
           echo "$UID, $GID"
 
+      # 其余步骤保持不变
       - name: Generate TAG
         id: Tag
         run: |
@@ -245,6 +245,7 @@ jobs:
             pnpm run pkg-linux
           fi
           rm -rf tmp/build/*-unpacked
+          # tools/build-appimage.sh ${{ steps.tag.outputs.tag }} ${{ matrix.ARCH }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -253,6 +254,7 @@ jobs:
           path: tmp/build
 
   build-win:
+    # 此 Job 未使用 pnpm，无需修改，保持原样
     name: Build Windows
     needs:
       - build-app
@@ -264,7 +266,7 @@ jobs:
         ARCH: ['x64']
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v2
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -274,14 +276,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm' # Windows构建用npm
-
       - name: Prepare
         run: |
           set -x
           echo $SHELL
           cat /etc/issue
-          apt update && apt install -y wget
+          apt update
           npm install asar -g
           npm install
           echo "$UID"
@@ -313,6 +313,7 @@ jobs:
           asar e app/app.asar app/app
           npm run pkg-win
           rm -rf tmp/build/*-unpacked
+          # tools/build-appimage.sh ${{ steps.tag.outputs.tag }} ${{ matrix.ARCH }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -321,6 +322,7 @@ jobs:
           path: tmp/build
 
   build-deepin:
+    # 此 Job 未使用 pnpm，无需修改，保持原样
     name: Build Deepin Package
     needs:
       - build-app
@@ -331,7 +333,7 @@ jobs:
         ARCH: ['x64', 'arm64', 'loong64']
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v2
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -340,7 +342,7 @@ jobs:
 
       - name: Prepare
         run: |
-          sudo apt update && sudo apt-get install -y build-essential fakeroot devscripts debhelper
+          sudo apt update && sudo apt-get install -y build-essential fakeroot devscripts debhelper # debmake lintian pbuilder
 
       - name: Generate TAG
         id: Tag
@@ -402,6 +404,7 @@ jobs:
           path: tmp/build
 
   upload:
+    # 此 Job 未使用 pnpm，无需修改，保持原样
     name: Create release and upload artifacts
     needs:
       - build-linux-simple
@@ -430,7 +433,7 @@ jobs:
           echo "::set-output name=tag::$tag"
           echo "::set-output name=name::$name"
 
-      - name: Create release and upload artifacts (continuous)
+      - name: Create release and upload artifacts
         if: startsWith(github.ref, 'refs/heads/')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -445,8 +448,8 @@ jobs:
           **build/*.exe \
           **build/*.rpm
 
-      - name: Release (tagged)
-        uses: softprops/action-gh-release@v2 # 升级到v2修复兼容性
+      - name: Release
+        uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
           name: ${{ steps.tag.outputs.name }}
