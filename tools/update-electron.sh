@@ -15,7 +15,7 @@ notice() {
 }
 
 # 大于28.2.1有问题：https://github.com/msojocs/bilibili-linux/issues/170, https://github.com/electron/electron/issues/42519
-electron_version="28.2.1"
+electron_version="40.6.1"
 if [ "$BUILD_ARCH" == "" ];then
   BUILD_ARCH="x64"
 elif [ "$BUILD_ARCH" == "amd64" ];then
@@ -27,11 +27,11 @@ download_url="https://npmmirror.com/mirrors/electron/${electron_version}/electro
 download_url="https://github.com/electron/electron/releases/download/v${electron_version}/electron-v${electron_version}-linux-${BUILD_ARCH}.zip"
 if [ "$BUILD_ARCH" == "loong64" ];then
   # 新世界
-  electron_version="22.3.27"
+  electron_version="40.6.1"
   download_url="https://github.com/msojocs/electron-loongarch/releases/download/v${electron_version}/electron-v${electron_version}-linux-loong64.zip"
 elif [ "$BUILD_ARCH" == "loongarch64" ];then
   # 旧世界
-  electron_version="22.3.27"
+  electron_version="v40.6.1"
   # download_url="http://ftp.loongnix.cn/electron/LoongArch/v22.3.27/electron-v22.3.27-linux-loong64.zip"
   download_url="https://github.com/msojocs/electron-loongarch/releases/download/v${electron_version}/electron-v${electron_version}-linux-loongarch64.zip"
 fi
