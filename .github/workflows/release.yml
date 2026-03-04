@@ -642,35 +642,21 @@ jobs:
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
-        with:
-          path: downloaded-artifacts  # 统一下载目录，方便管理
-
-      - name: Inspect and fix permissions
+      - name: Inspect directory after downloading artifacts
         run: |
-          # 1. 清理无用文件
-          rm -rf ./downloaded-artifacts/bilibili-app.src
-          
-          # 2. 修复所有文件权限（解决 Permission denied 核心问题）
-          sudo chmod -R 777 downloaded-artifacts/
-          
-          # 3. 创建统一的 build 目录，集中所有产物
-          mkdir -p build
-          cp -rf downloaded-artifacts/*/* build/  # 移动所有 artifacts 产物到 build 目录
-          
-          # 4. 检查目录结构和文件权限（调试用）
-          echo "=== Final build directory content ==="
-          ls -alFR build/
-          echo "===================================="
+          # 新增：修复所有下载文件的权限（核心修复）
+          sudo chmod -R 777 ./*
+          rm -rf ./bilibili-app.src
+          ls -alFR
 
       - name: Generate TAG
         id: Tag
         run: |
           tag='continuous'
           name='Continuous Build'
-          # 修复 Shell 语法错误：用 [[ ]] 正确判断，避免嵌套异常
-          if [[ "${{ startsWith(github.ref, 'refs/tags/') }}" == "true" ]]; then
-            tag="${{ github.ref_name }}"
-            name="${{ github.ref_name }}"
+          if [ 'true' == ${{ startsWith(github.ref, 'refs/tags/') }} ];then
+            tag='${{ github.ref_name }}'
+            name='${{ github.ref_name }}'
           fi
           echo "tag result: $tag - $name"
           echo "::set-output name=tag::$tag"
@@ -681,42 +667,27 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 安装依赖
-          sudo apt update && sudo apt install -y fuse
-          
-          # 下载上传工具并赋予执行权限
+          # 新增：再次确认权限（防止后续生成文件权限异常）
+          sudo chmod -R 777 ./*
+          sudo apt install -y fuse
           wget -q https://github.com/TheAssassin/pyuploadtool/releases/download/continuous/pyuploadtool-x86_64.AppImage
           chmod +x pyuploadtool-x86_64.AppImage
-          
-          # 构建上传文件列表（只上传存在的文件，避免访问无权限/不存在文件）
-          UPLOAD_FILES=()
-          for ext in tar.gz AppImage deb rpm; do
-            for file in build/*.$ext; do
-              if [[ -f "$file" ]]; then  # 只添加存在的文件
-                UPLOAD_FILES+=("$file")
-                echo "Will upload: $file"
-              fi
-            done
-          done
-          
-          # 只有存在文件时才执行上传，避免空上传报错
-          if [[ ${#UPLOAD_FILES[@]} -gt 0 ]]; then
-            ./pyuploadtool-x86_64.AppImage "${UPLOAD_FILES[@]}"
-          else
-            echo "Warning: No valid artifacts to upload!"
-          fi
+          ./pyuploadtool-x86_64.AppImage \
+          **build/*.tar.gz \
+          **build/*.AppImage \
+          **build/*.deb \
+          **build/*.rpm
 
       - name: Release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          name: ${{ steps.Tag.outputs.name }}
-          tag_name: ${{ steps.Tag.outputs.tag }}
-          # 简化路径，直接指向统一的 build 目录，避免通配符嵌套问题
+          # note you'll typically need to create a personal access token
+          # with permissions to create releases in the other repo
+          name: ${{ steps.tag.outputs.name }}
+          tag_name: ${{ steps.tag.outputs.tag }}
           files: |
-            build/*.tar.gz
-            build/*.AppImage
-            build/*.deb
-            build/*.rpm
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            **build/*.tar.gz
+            **build/*.AppImage
+            **build/*.deb
+            **build/*.rpm
