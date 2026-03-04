@@ -107,7 +107,7 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [16.x]
+        node-version: [22.x]
         ARCH: ['x64', 'arm64', 'loong64', 'loongarch64']
         # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
 
@@ -182,7 +182,7 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [16.x]
+        node-version: [22.x]
         ARCH: ['x64', 'loong64']
         # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
 
@@ -254,7 +254,7 @@ jobs:
     container: scottyhardy/docker-wine
     strategy:
       matrix:
-        node-version: [16.x]
+        node-version: [22.x]
         ARCH: ['x64']
         # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
 
@@ -268,7 +268,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: Prepare
         run: |
           set -x
