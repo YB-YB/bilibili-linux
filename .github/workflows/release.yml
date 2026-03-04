@@ -579,7 +579,7 @@ jobs:
       - build-linux-simple
       - build-linux-package
       #- build-win
-      #- build-deepin
+      - build-deepin
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
@@ -614,7 +614,7 @@ jobs:
           **build/*.tar.gz \
           **build/*.AppImage \
           **build/*.deb \
-          **build/*.exe \
+          # **build/*.exe \
           **build/*.rpm
 
       - name: Release
