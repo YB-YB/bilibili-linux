@@ -25,7 +25,7 @@ mkdir -p "$root_dir/app"
 notice "构建拓展"
 rm -rf "$root_dir/app/extensions"
 
-pnpm install
+pnpm install --no-frozen-lockfile
 pnpm run build
 notice "复制拓展"
 mkdir -p "$root_dir/app/extensions"
