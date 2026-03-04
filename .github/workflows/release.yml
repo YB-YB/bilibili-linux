@@ -221,19 +221,20 @@ jobs:
         ARCH: ['x64']
 
     steps:
-      - uses: actions/checkout@v4  # 升级到最新版，更稳定
+      - uses: actions/checkout@v4
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           name: bilibili-app.src
           path: tmp/src
       
-      # 关键：先进入源码目录（artifacts 下载的目录），再执行依赖安装
+      # 第一步先设置 Node.js，但暂时不缓存 PNPM（先解决命令找不到的问题）
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-          cache: 'pnpm'  # 缓存 PNPM 依赖，加速构建
+          # 暂时注释缓存，先确保 PNPM 能运行
+          # cache: 'pnpm'
 
       - name: Prepare build environment
         env:
@@ -241,23 +242,27 @@ jobs:
         run: |
           # 1. 全局安装必要工具
           sudo npm install asar -g
+          
+          # 2. 安装并启用 corepack，强制刷新 PNPM 链接
           npm install -g corepack@latest
-          corepack enable pnpm
-          corepack use pnpm@10.30.3  # 固定 PNPM 版本，避免 latest 版本兼容问题
+          corepack enable
+          corepack prepare pnpm@10.30.3 --activate  # 固定版本并激活
           
-          # 2. 进入 artifacts 下载的源码目录（关键！）
+          # 3. 验证 PNPM 是否可用（调试用）
+          echo "PNPM version: $(pnpm --version)"
+          echo "PATH: $PATH"
+          
+          # 4. 进入源码目录，清理旧文件
           cd tmp/src
-          
-          # 3. 清理旧锁文件和依赖，确保环境干净
           rm -rf node_modules pnpm-lock.yaml
           
-          # 4. 重新安装依赖，强制生成新锁文件（无需 frozen 校验）
-          pnpm install
+          # 5. 安装依赖
+          pnpm install --no-frozen-lockfile
           
-          # 调试信息（可选，方便排查）
-          echo "Current directory: $(pwd)"
-          echo "Electron version in package.json: $(grep -i electron package.json | head -1)"
+          # 调试信息
           echo "$UID, $GID"
+          echo "Electron version in package.json: $(grep -i electron package.json | head -1)"
+
 
       - name: Generate TAG
         id: Tag
