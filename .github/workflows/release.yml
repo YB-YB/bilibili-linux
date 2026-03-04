@@ -30,7 +30,7 @@ jobs:
         # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
       - name: Use Node.js
@@ -175,6 +175,40 @@ jobs:
           name: bilibili-${{ matrix.ARCH }}-archiev.build
           path: tmp/build
 
+  # build-linux-package:
+  #   name: Build Linux Package
+  #   needs:
+  #     - build-app
+  #   runs-on: ubuntu-latest
+
+  #   strategy:
+  #     matrix:
+  #       node-version: [22.x]
+  #       #ARCH: ['x64', 'loong64']
+  #       ARCH: ['x64']
+  #       # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
+
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #     - name: Download artifacts
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: bilibili-app.src
+  #         path: tmp/src
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 22
+
+  #     - name: Prepare
+  #       env:
+  #         BUILD_ARCH: ${{ matrix.ARCH }}
+  #       run: |
+  #         sudo npm install asar -g
+  #         npm install -g corepack@latest
+  #         corepack enable pnpm
+  #         corepack use pnpm@latest
+  #         pnpm install --no-frozen-lockfile
+  #         echo "$UID, $GID"
   build-linux-package:
     name: Build Linux Package
     needs:
@@ -184,30 +218,45 @@ jobs:
     strategy:
       matrix:
         node-version: [22.x]
-        #ARCH: ['x64', 'loong64']
         ARCH: ['x64']
-        # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4  # 升级到最新版，更稳定
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           name: bilibili-app.src
           path: tmp/src
-      - uses: actions/setup-node@v4
+      
+      # 关键：先进入源码目录（artifacts 下载的目录），再执行依赖安装
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
+          cache: 'pnpm'  # 缓存 PNPM 依赖，加速构建
 
-      - name: Prepare
+      - name: Prepare build environment
         env:
           BUILD_ARCH: ${{ matrix.ARCH }}
         run: |
+          # 1. 全局安装必要工具
           sudo npm install asar -g
           npm install -g corepack@latest
           corepack enable pnpm
-          corepack use pnpm@latest
-          pnpm install --no-frozen-lockfile
+          corepack use pnpm@10.30.3  # 固定 PNPM 版本，避免 latest 版本兼容问题
+          
+          # 2. 进入 artifacts 下载的源码目录（关键！）
+          cd tmp/src
+          
+          # 3. 清理旧锁文件和依赖，确保环境干净
+          rm -rf node_modules pnpm-lock.yaml
+          
+          # 4. 重新安装依赖，强制生成新锁文件（无需 frozen 校验）
+          pnpm install
+          
+          # 调试信息（可选，方便排查）
+          echo "Current directory: $(pwd)"
+          echo "Electron version in package.json: $(grep -i electron package.json | head -1)"
           echo "$UID, $GID"
 
       - name: Generate TAG
