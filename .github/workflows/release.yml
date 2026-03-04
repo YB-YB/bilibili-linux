@@ -371,89 +371,90 @@ jobs:
   #         name: bilibili-${{ matrix.ARCH }}-winpkg.build
   #         path: tmp/build
 
-  # build-deepin:
-  #   name: Build Deepin Package
-  #   needs:
-  #     - build-app
-  #   runs-on: ubuntu-latest
+  build-deepin:
+    name: Build Deepin Package
+    needs:
+      - build-app
+    runs-on: ubuntu-latest
 
-  #   strategy:
-  #     matrix:
-  #       ARCH: ['x64', 'arm64', 'loong64']
-  #       # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
+    strategy:
+      matrix:
+        # ARCH: ['x64', 'arm64', 'loong64']
+        ARCH: ['x64', 'arm64']
+        # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
 
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - name: Download artifacts
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         name: bilibili-app.src
-  #         path: tmp/src
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bilibili-app.src
+          path: tmp/src
 
-  #     - name: Prepare
-  #       run: |
-  #         sudo apt update && sudo apt-get install -y build-essential fakeroot devscripts debhelper # debmake lintian pbuilder
+      - name: Prepare
+        run: |
+          sudo apt update && sudo apt-get install -y build-essential fakeroot devscripts debhelper # debmake lintian pbuilder
 
-  #     - name: Generate TAG
-  #       id: Tag
-  #       run: |
-  #         tag='continuous'
-  #         name='Continuous Build'
-  #         if [ 'true' == ${{ startsWith(github.ref, 'refs/tags/') }} ];then
-  #           tag='${{ github.ref_name }}'
-  #           name='${{ github.ref_name }}'
-  #         else
-  #           BILIBILI_VERSION=$(cat conf/bilibili_version)
-  #           tag="v${BILIBILI_VERSION}-${tag}"
-  #         fi
-  #         echo "tag result: $tag - $name"
-  #         echo "::set-output name=tag::$tag"
-  #         echo "::set-output name=name::$name"
-  #     # https://stackoverflow.com/questions/61096521/how-to-use-gpg-key-in-github-actions
+      - name: Generate TAG
+        id: Tag
+        run: |
+          tag='continuous'
+          name='Continuous Build'
+          if [ 'true' == ${{ startsWith(github.ref, 'refs/tags/') }} ];then
+            tag='${{ github.ref_name }}'
+            name='${{ github.ref_name }}'
+          else
+            BILIBILI_VERSION=$(cat conf/bilibili_version)
+            tag="v${BILIBILI_VERSION}-${tag}"
+          fi
+          echo "tag result: $tag - $name"
+          echo "::set-output name=tag::$tag"
+          echo "::set-output name=name::$name"
+      # https://stackoverflow.com/questions/61096521/how-to-use-gpg-key-in-github-actions
 
-  #     - name: Build Deb Package
-  #       env:
-  #         BUILD_ARCH: ${{ matrix.ARCH }}
-  #         BUILD_TAG: ${{ steps.tag.outputs.tag }}
-  #       run: |
-  #         export BUILD_VERSION=${{ steps.tag.outputs.tag }}
-  #         ls -l
-  #         mkdir -p tmp/build
-  #         tools/build-prepare.sh
-  #         echo "${{ matrix.ARCH }}"
-  #         if [ "${{ matrix.ARCH }}" == "arm64" ];then
-  #           export LD_LIBRARY_PATH="/usr/aarch64-linux-gnu/lib"
-  #         fi
-  #         tools/update-electron.sh
-  #         if [ "$BUILD_ARCH" == "x64" ];then
-  #           export BUILD_ARCH="amd64"
-  #         fi
-  #         dpkg --version
-  #         if [[ "$BUILD_ARCH" == loong* ]];then
-  #           echo "build loong"
-  #           export DOCKER_UID=$(id -u)
-  #           export DOCKER_GID=$(id -g)
-  #           cat /etc/passwd
-  #           env
-  #           tools/build-deepin-loongarch.sh
-  #           if [ -f tmp/exit_code ];then
-  #             exit $(cat tmp/exit_code)
-  #           fi
-  #         else
-  #           echo "build simple"
-  #           tools/build-deepin.sh ${{ steps.tag.outputs.tag }}
-  #           mkdir -p info/DEBIAN
-  #           dpkg -e ./tmp/build/io.github.msojocs.bilibili_*.deb info/DEBIAN
-  #           ls -l info/DEBIAN
-  #           rm -rf info
-  #         fi
+      - name: Build Deb Package
+        env:
+          BUILD_ARCH: ${{ matrix.ARCH }}
+          BUILD_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          export BUILD_VERSION=${{ steps.tag.outputs.tag }}
+          ls -l
+          mkdir -p tmp/build
+          tools/build-prepare.sh
+          echo "${{ matrix.ARCH }}"
+          if [ "${{ matrix.ARCH }}" == "arm64" ];then
+            export LD_LIBRARY_PATH="/usr/aarch64-linux-gnu/lib"
+          fi
+          tools/update-electron.sh
+          if [ "$BUILD_ARCH" == "x64" ];then
+            export BUILD_ARCH="amd64"
+          fi
+          dpkg --version
+          if [[ "$BUILD_ARCH" == loong* ]];then
+            echo "build loong"
+            export DOCKER_UID=$(id -u)
+            export DOCKER_GID=$(id -g)
+            cat /etc/passwd
+            env
+            tools/build-deepin-loongarch.sh
+            if [ -f tmp/exit_code ];then
+              exit $(cat tmp/exit_code)
+            fi
+          else
+            echo "build simple"
+            tools/build-deepin.sh ${{ steps.tag.outputs.tag }}
+            mkdir -p info/DEBIAN
+            dpkg -e ./tmp/build/io.github.msojocs.bilibili_*.deb info/DEBIAN
+            ls -l info/DEBIAN
+            rm -rf info
+          fi
 
-  #     - name: Upload artifact
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         # Artifact name
-  #         name: bilibili-${{ matrix.ARCH }}-deepinpkg.build
-  #         path: tmp/build
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          # Artifact name
+          name: bilibili-${{ matrix.ARCH }}-deepinpkg.build
+          path: tmp/build
 
   # build-arch:
   #   name: Build ArchLinux Package
